@@ -36,6 +36,8 @@ client = genai.Client(
     http_options={'api_version': 'v1beta'}
 )
 
+MODEL_NAME = 'gemini-3.1-flash-lite'
+
 SYSTEM_INSTRUCTIONS = """
 [AGENT IDENTITY] You are a dedicated, verbatim Call Transcription Engine and Quality Specialist. Your persistent primary directive is to process provided call audio files into clean, accurate, and structured output.
 
@@ -71,6 +73,14 @@ SYSTEM_INSTRUCTIONS = """
 * **Areas of Improvement:** [Bullet points]
 """
 
+# --- Espacio en memoria de la sesión: aquí se guarda el reporte y el chat ---
+if "report" not in st.session_state:
+    st.session_state["report"] = None
+if "chat_session" not in st.session_state:
+    st.session_state["chat_session"] = None
+if "chat_messages" not in st.session_state:
+    st.session_state["chat_messages"] = []
+
 uploaded_file = st.file_uploader(
     "Selecciona un archivo de audio (.mp3, .wav, .m4a)", 
     type=["mp3", "wav", "m4a", "aac"]
@@ -78,10 +88,10 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
     st.audio(uploaded_file, format="audio/mp3")
-    
+
     if st.button("🚀 Procesar y Auditar Llamada", type="primary"):
         with st.spinner("Procesando llamada con Gemini AI... Esto puede tardar unos segundos según la duración."):
-            
+
             # Guardar el archivo temporalmente en disco local
             with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp_file:
                 tmp_file.write(uploaded_file.getvalue())
@@ -99,44 +109,91 @@ if uploaded_file is not None:
                 for intento in range(1, max_intentos + 1):
                     try:
                         response = client.models.generate_content(
-                            model='gemini-3.1-flash-lite',
+                            model=MODEL_NAME,
                             contents=[google_audio_file, "Por favor procesa este audio siguiendo las System Instructions."],
                             config=types.GenerateContentConfig(
                                 system_instruction=SYSTEM_INSTRUCTIONS,
                                 temperature=0.2
                             )
                         )
-                        break  # si funcionó, salimos del ciclo de reintentos
+                        break
                     except Exception as err_intento:
                         if "503" in str(err_intento) and intento < max_intentos:
-                            espera = 15 * intento  # espera 15s, luego 30s
+                            espera = 15 * intento
                             st.toast(f"⏳ Servidor ocupado, reintentando en {espera}s (intento {intento}/{max_intentos})...", icon="🔄")
                             time.sleep(espera)
                         else:
                             raise
 
-                # 3. Mostrar el resultado
-                st.success("✅ ¡Auditoría completada exitosamente!")
-                st.markdown(response.text)
+                # 3. Guardar el reporte en la sesión (para que no se pierda al interactuar después)
+                st.session_state["report"] = response.text
 
-                st.download_button(
-                    label="📥 Descargar Reporte de QA (.txt)",
-                    data=response.text,
-                    file_name=f"Reporte_QA_{uploaded_file.name}.txt",
-                    mime="text/plain"
+                # 4. Preparar una sesión de chat nueva, con la transcripción como contexto
+                chat_system_instruction = f"""Eres un asistente que ayuda a un evaluador de calidad a discutir una llamada de servicio al cliente.
+Ya existe una transcripción completa y una evaluación de soft skills de esta llamada, que se muestra a continuación.
+Responde SIEMPRE basándote en esta información. Si te preguntan algo que no se puede saber a partir de la transcripción, dilo claramente.
+
+=== TRANSCRIPCIÓN Y EVALUACIÓN DE LA LLAMADA ===
+{response.text}
+=== FIN DE LA TRANSCRIPCIÓN ===
+"""
+                st.session_state["chat_session"] = client.chats.create(
+                    model=MODEL_NAME,
+                    config=types.GenerateContentConfig(
+                        system_instruction=chat_system_instruction,
+                        temperature=0.3
+                    )
                 )
+                st.session_state["chat_messages"] = []  # limpiar chat anterior si procesa una llamada nueva
 
             except Exception as e:
                 st.error(f"Ocurrió un error al procesar el audio: {str(e)}")
 
             finally:
-                # Destrucción del archivo en los servidores de Google y local
                 if google_audio_file:
                     try:
                         client.files.delete(name=google_audio_file.name)
                         st.toast("🛡️ El archivo de audio fue eliminado permanentemente de los servidores de Google.", icon="🔒")
                     except Exception:
                         pass
-                
+
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
+
+# --- Mostrar el reporte y el botón de descarga (persiste aunque interactúes con el chat) ---
+if st.session_state["report"]:
+    st.success("✅ ¡Auditoría completada exitosamente!")
+    st.markdown(st.session_state["report"])
+
+    st.download_button(
+        label="📥 Descargar Reporte de QA (.txt)",
+        data=st.session_state["report"],
+        file_name="Reporte_QA.txt",
+        mime="text/plain"
+    )
+
+    st.divider()
+    st.subheader("💬 Discute los resultados con el asistente")
+    st.caption("Pregúntale sobre el tono, la resolución, el cliente, o cualquier detalle de la llamada.")
+
+    # Mostrar historial del chat
+    for msg in st.session_state["chat_messages"]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Caja de texto para preguntar
+    pregunta = st.chat_input("Escribe tu pregunta sobre la llamada...")
+
+    if pregunta:
+        st.session_state["chat_messages"].append({"role": "user", "content": pregunta})
+        with st.chat_message("user"):
+            st.markdown(pregunta)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Pensando..."):
+                try:
+                    respuesta_chat = st.session_state["chat_session"].send_message(pregunta)
+                    st.markdown(respuesta_chat.text)
+                    st.session_state["chat_messages"].append({"role": "assistant", "content": respuesta_chat.text})
+                except Exception as e:
+                    st.error(f"Ocurrió un error al responder: {str(e)}")
