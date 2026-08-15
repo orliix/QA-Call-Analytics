@@ -29,8 +29,11 @@ if not api_key:
     st.warning("⚠️ Por favor, ingresa tu API Key en la barra lateral izquierda para comenzar.")
     st.stop()
 
-# Configurar el cliente oficial
-client = genai.Client(api_key=api_key)
+# Configurar el cliente oficial especificando la versión v1beta para compatibilidad total
+client = genai.Client(
+    api_key=api_key,
+    http_options={'api_version': 'v1beta'}
+)
 
 SYSTEM_INSTRUCTIONS = """
 [AGENT IDENTITY] You are a dedicated, verbatim Call Transcription Engine and Quality Specialist. Your persistent primary directive is to process provided call audio files into clean, accurate, and structured output.
@@ -88,7 +91,7 @@ if uploaded_file is not None:
                 # 1. Subir audio usando el cliente
                 google_audio_file = client.files.upload(file=tmp_path)
                 
-                # 2. Generar el contenido usando la sintaxis nueva
+                # 2. Generar el contenido usando la sintaxis nueva y el modelo v2.0
                 response = client.models.generate_content(
                     model='gemini-2.0-flash',
                     contents=[google_audio_file, "Por favor procesa este audio siguiendo las System Instructions."],
@@ -115,8 +118,11 @@ if uploaded_file is not None:
             finally:
                 # Destrucción del archivo en los servidores de Google y local
                 if google_audio_file:
-                    client.files.delete(name=google_audio_file.name)
-                    st.toast("🛡️ El archivo de audio fue eliminado permanentemente de los servidores de Google.", icon="🔒")
+                    try:
+                        client.files.delete(name=google_audio_file.name)
+                        st.toast("🛡️ El archivo de audio fue eliminado permanentemente de los servidores de Google.", icon="🔒")
+                    except Exception:
+                        pass
                 
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
