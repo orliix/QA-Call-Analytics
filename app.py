@@ -30,11 +30,16 @@ if not api_key:
     st.warning("⚠️ Por favor, ingresa tu API Key en la barra lateral izquierda para comenzar.")
     st.stop()
 
-# Configurar el cliente oficial especificando la versión v1beta para compatibilidad total
-client = genai.Client(
-    api_key=api_key,
-    http_options={'api_version': 'v1beta'}
-)
+# Configurar el cliente oficial UNA SOLA VEZ y guardarlo en la sesión.
+# (Si se crea uno nuevo en cada interacción, el chat se queda sin conexión y falla)
+if "client" not in st.session_state or st.session_state.get("api_key_usada") != api_key:
+    st.session_state["client"] = genai.Client(
+        api_key=api_key,
+        http_options={'api_version': 'v1beta'}
+    )
+    st.session_state["api_key_usada"] = api_key
+
+client = st.session_state["client"]
 
 MODEL_NAME = 'gemini-3.1-flash-lite'
 
