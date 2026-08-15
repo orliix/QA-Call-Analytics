@@ -18,26 +18,46 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- Pantalla de contraseña ---
+def password_entered():
+    if st.session_state["password_input"] == st.secrets["APP_PASSWORD"]:
+        st.session_state["autenticado"] = True
+        del st.session_state["password_input"]
+    else:
+        st.session_state["autenticado"] = False
+
+def check_password():
+    if st.session_state.get("autenticado", False):
+        return True
+
+    st.title("🔒 Acceso privado")
+    st.text_input("Contraseña", type="password", on_change=password_entered, key="password_input")
+
+    if "autenticado" in st.session_state and not st.session_state["autenticado"]:
+        st.error("😕 Contraseña incorrecta, intenta de nuevo.")
+
+    return False
+
+if not check_password():
+    st.stop()
+
 st.title("🎙️ Call Analytics & Quality Assurance Agent")
 st.caption("Plataforma de Auditoría Automática de Llamadas y Evaluación de Soft Skills")
 
 with st.sidebar:
     st.header("⚙️ Configuración")
-    api_key = st.text_input("Ingresa tu Gemini API Key:", type="password")
     st.info("🔒 Tus archivos de audio se analizan y se ELIMINAN automáticamente de los servidores al finalizar el proceso.")
 
-if not api_key:
-    st.warning("⚠️ Por favor, ingresa tu API Key en la barra lateral izquierda para comenzar.")
-    st.stop()
+# La API Key ya no se escribe a mano: se lee de los secretos de Streamlit Cloud
+api_key = st.secrets["GEMINI_API_KEY"]
 
 # Configurar el cliente oficial UNA SOLA VEZ y guardarlo en la sesión.
 # (Si se crea uno nuevo en cada interacción, el chat se queda sin conexión y falla)
-if "client" not in st.session_state or st.session_state.get("api_key_usada") != api_key:
+if "client" not in st.session_state:
     st.session_state["client"] = genai.Client(
         api_key=api_key,
         http_options={'api_version': 'v1beta'}
     )
-    st.session_state["api_key_usada"] = api_key
 
 client = st.session_state["client"]
 
