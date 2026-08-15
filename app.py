@@ -1,4 +1,5 @@
 import os
+import time
 import tempfile
 import streamlit as st
 from google import genai
@@ -87,24 +88,37 @@ if uploaded_file is not None:
                 tmp_path = tmp_file.name
 
             google_audio_file = None
+            max_intentos = 3
+
             try:
                 # 1. Subir audio usando el cliente
                 google_audio_file = client.files.upload(file=tmp_path)
-                
-                # 2. Generar el contenido usando la sintaxis nueva y el modelo v2.0
-                response = client.models.generate_content(
-                    model='gemini-3.1-flash-lite',
-                    contents=[google_audio_file, "Por favor procesa este audio siguiendo las System Instructions."],
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_INSTRUCTIONS,
-                        temperature=0.2
-                    )
-                )
-                
+
+                # 2. Generar el contenido, con reintentos automáticos si el servidor está ocupado
+                response = None
+                for intento in range(1, max_intentos + 1):
+                    try:
+                        response = client.models.generate_content(
+                            model='gemini-3.1-flash-lite',
+                            contents=[google_audio_file, "Por favor procesa este audio siguiendo las System Instructions."],
+                            config=types.GenerateContentConfig(
+                                system_instruction=SYSTEM_INSTRUCTIONS,
+                                temperature=0.2
+                            )
+                        )
+                        break  # si funcionó, salimos del ciclo de reintentos
+                    except Exception as err_intento:
+                        if "503" in str(err_intento) and intento < max_intentos:
+                            espera = 15 * intento  # espera 15s, luego 30s
+                            st.toast(f"⏳ Servidor ocupado, reintentando en {espera}s (intento {intento}/{max_intentos})...", icon="🔄")
+                            time.sleep(espera)
+                        else:
+                            raise
+
                 # 3. Mostrar el resultado
                 st.success("✅ ¡Auditoría completada exitosamente!")
                 st.markdown(response.text)
-                
+
                 st.download_button(
                     label="📥 Descargar Reporte de QA (.txt)",
                     data=response.text,
