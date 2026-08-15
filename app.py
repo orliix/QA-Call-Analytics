@@ -90,7 +90,7 @@ if uploaded_file is not None:
                 
                 # 2. Generar el contenido usando la sintaxis nueva
                 response = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model='gemini-1.5-flash',
                     contents=[google_audio_file, "Por favor procesa este audio siguiendo las System Instructions."],
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_INSTRUCTIONS,
