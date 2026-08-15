@@ -1,14 +1,14 @@
 import os
 import tempfile
 import streamlit as st
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 st.set_page_config(
     page_title="Call Analytics & QA Transcriber",
     page_icon="🎙️",
     layout="wide"
 )
-
 
 st.markdown("""
     <style>
@@ -29,8 +29,8 @@ if not api_key:
     st.warning("⚠️ Por favor, ingresa tu API Key en la barra lateral izquierda para comenzar.")
     st.stop()
 
-# Configurar el SDK de Google
-genai.configure(api_key=api_key)
+# Configurar el cliente oficial
+client = genai.Client(api_key=api_key)
 
 SYSTEM_INSTRUCTIONS = """
 [AGENT IDENTITY] You are a dedicated, verbatim Call Transcription Engine and Quality Specialist. Your persistent primary directive is to process provided call audio files into clean, accurate, and structured output.
@@ -67,13 +67,6 @@ SYSTEM_INSTRUCTIONS = """
 * **Areas of Improvement:** [Bullet points]
 """
 
-# Configurar el modelo con temperatura 0.2
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash", # Puedes usar gemini-1.5-pro o gemini-2.5-flash
-    system_instruction=SYSTEM_INSTRUCTIONS,
-    generation_config={"temperature": 0.2}
-)
-
 uploaded_file = st.file_uploader(
     "Selecciona un archivo de audio (.mp3, .wav, .m4a)", 
     type=["mp3", "wav", "m4a", "aac"]
@@ -92,19 +85,23 @@ if uploaded_file is not None:
 
             google_audio_file = None
             try:
-                # 1. Subir audio a la API de Google Gemini
-                google_audio_file = genai.upload_file(path=tmp_path)
+                # 1. Subir audio usando el cliente
+                google_audio_file = client.files.upload(file=tmp_path)
                 
-                # 2. Generar el contenido usando el prompt configurado
-                response = model.generate_content([google_audio_file, "Por favor procesa este audio siguiendo las System Instructions."])
+                # 2. Generar el contenido usando la sintaxis nueva
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[google_audio_file, "Por favor procesa este audio siguiendo las System Instructions."],
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_INSTRUCTIONS,
+                        temperature=0.2
+                    )
+                )
                 
                 # 3. Mostrar el resultado
                 st.success("✅ ¡Auditoría completada exitosamente!")
-                
-                # Mostrar resultado completo en markdown
                 st.markdown(response.text)
                 
-                # Botón para descargar el reporte
                 st.download_button(
                     label="📥 Descargar Reporte de QA (.txt)",
                     data=response.text,
@@ -116,12 +113,10 @@ if uploaded_file is not None:
                 st.error(f"Ocurrió un error al procesar el audio: {str(e)}")
 
             finally:
-                # 🛡️ SCRIPT DE DESTRUCCIÓN DE ARCHIVOS
-                # Se ejecuta siempre, haya éxito o error
+                # Destrucción del archivo en los servidores de Google y local
                 if google_audio_file:
-                    genai.delete_file(google_audio_file.name)
+                    client.files.delete(name=google_audio_file.name)
                     st.toast("🛡️ El archivo de audio fue eliminado permanentemente de los servidores de Google.", icon="🔒")
                 
-                # Eliminar archivo temporal local
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
