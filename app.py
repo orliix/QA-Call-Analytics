@@ -134,12 +134,12 @@ if "chat_messages" not in st.session_state:
     st.session_state["chat_messages"] = []
 
 uploaded_file = st.file_uploader(
-    "Selecciona un archivo de audio (.mp3, .wav, .m4a)", 
-    type=["mp3", "wav", "m4a", "aac"]
+    "Selecciona un archivo de audio (.mp3, .wav, .m4a, .aac, .ogg, .flac, .aiff)", 
+    type=["mp3", "wav", "m4a", "aac", "ogg", "flac", "aiff", "aif"]
 )
 
 if uploaded_file is not None:
-    st.audio(uploaded_file, format="audio/mp3")
+    st.audio(uploaded_file, format=uploaded_file.type)
 
     if st.button("🚀 Procesar y Auditar Llamada", type="primary"):
         progress_bar = st.progress(0, text="Preparando archivo...")
@@ -184,7 +184,8 @@ if uploaded_file is not None:
             # 3. Guardar el reporte en la sesión (para que no se pierda al interactuar después)
             st.session_state["report"] = response.text
 
-            # 4. Preparar una sesión de chat nueva, con la transcripción como contexto
+            # 4. Preparar una sesión de chat nueva, usando un "cache" de contexto para no
+            #    tener que reenviar (ni volver a cobrar) toda la transcripción en cada pregunta.
             chat_system_instruction = f"""Eres un asistente que ayuda a un evaluador de calidad a discutir una llamada de servicio al cliente.
 Ya existe una transcripción completa y una evaluación de soft skills de esta llamada, que se muestra a continuación.
 Responde SIEMPRE basándote en esta información. Si te preguntan algo que no se puede saber a partir de la transcripción, dilo claramente.
@@ -193,13 +194,32 @@ Responde SIEMPRE basándote en esta información. Si te preguntan algo que no se
 {response.text}
 === FIN DE LA TRANSCRIPCIÓN ===
 """
-            st.session_state["chat_session"] = client.chats.create(
-                model=MODEL_NAME,
-                config=types.GenerateContentConfig(
-                    system_instruction=chat_system_instruction,
-                    temperature=0.3
+            try:
+                # Guardamos la transcripción una sola vez en un cache (dura 1 hora)
+                cache = client.caches.create(
+                    model=MODEL_NAME,
+                    config=types.CreateCachedContentConfig(
+                        system_instruction=chat_system_instruction,
+                        ttl="3600s",
+                    )
                 )
-            )
+                st.session_state["chat_session"] = client.chats.create(
+                    model=MODEL_NAME,
+                    config=types.GenerateContentConfig(
+                        cached_content=cache.name,
+                        temperature=0.3
+                    )
+                )
+            except Exception:
+                # Si la llamada es muy corta, puede no alcanzar el mínimo de texto para cachear.
+                # En ese caso, seguimos funcionando igual, solo que sin el ahorro del cache.
+                st.session_state["chat_session"] = client.chats.create(
+                    model=MODEL_NAME,
+                    config=types.GenerateContentConfig(
+                        system_instruction=chat_system_instruction,
+                        temperature=0.3
+                    )
+                )
             st.session_state["chat_messages"] = []  # limpiar chat anterior si procesa una llamada nueva
 
             progress_bar.progress(100, text="¡Listo!")
