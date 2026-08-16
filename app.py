@@ -220,6 +220,7 @@ if uploaded_file is not None:
             chat_system_instruction = f"""Eres un asistente que ayuda a un evaluador de calidad a discutir una llamada de servicio al cliente.
 Ya existe una transcripción completa y una evaluación de soft skills de esta llamada, que se muestra a continuación.
 Responde SIEMPRE basándote en esta información. Si te preguntan algo que no se puede saber a partir de la transcripción, dilo claramente.
+IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pregunta (si pregunta en español, responde en español; si pregunta en inglés, responde en inglés), sin importar en qué idioma esté la transcripción o el resto de este reporte.
 
 === TRANSCRIPCIÓN Y EVALUACIÓN DE LA LLAMADA ===
 {response.text}
