@@ -90,6 +90,7 @@ SYSTEM_INSTRUCTIONS = """
    - Flag any silence/dead air longer than 20 seconds directly inline in the transcript, e.g. "[Dead air - 25s]", at the point where it occurs.
 
 2. CALL OVERVIEW (write this section in English, regardless of the language spoken on the call):
+   - Agent Name (if stated on the call): Listen for the agent introducing themselves, usually near the start of the call (e.g. "my name is...", "you're speaking with...", "this is ... from..."). If a name is clearly stated at any point, write it exactly as spoken (proper capitalization). If no name is ever mentioned, write exactly: Not stated
    - Language(s) Detected: [e.g. "Spanish", "English", or "Spanish and English (mixed)"]
    - Reason for Call: 1-2 sentences summarizing the caller's main issue/request.
    - Resolution Provided: 1-2 sentences summarizing the outcome or next steps.
@@ -118,6 +119,7 @@ SYSTEM_INSTRUCTIONS = """
 ---
 
 #### Call Overview
+* **Agent Name (if stated on the call):** [Name exactly as stated, or "Not stated"]
 * **Language(s) Detected:** [Detected language(s)]
 * **Reason for Call:** [Summary]
 * **Resolution Provided:** [Outcome]
@@ -159,7 +161,7 @@ uploaded_file = st.file_uploader(
     type=["mp3", "wav", "m4a", "aac", "ogg", "flac", "aiff", "aif"]
 )
 
-agent_name_input = st.text_input("Nombre del agente auditado (opcional):", key="agent_name_input")
+agent_name_input = st.text_input("Nombre del agente (respaldo, solo se usa si la IA no logra detectarlo en la llamada):", key="agent_name_input")
 
 if uploaded_file is not None:
     st.audio(uploaded_file, format=uploaded_file.type)
@@ -212,7 +214,20 @@ if uploaded_file is not None:
 
             # 3. Guardar el reporte en la sesión (para que no se pierda al interactuar después)
             st.session_state["report"] = response.text
-            st.session_state["agent_name"] = agent_name_input.strip() if agent_name_input else "No especificado"
+
+            # Intentar extraer el nombre del agente que la IA detectó en la llamada.
+            # Prioridad: 1) nombre detectado por la IA, 2) nombre escrito en la caja, 3) "No especificado"
+            coincidencia_nombre = re.search(r"Agent Name.*?:\*\*\s*(.+)", response.text)
+            nombre_detectado = coincidencia_nombre.group(1).strip() if coincidencia_nombre else ""
+            nombre_no_valido = nombre_detectado.lower() in ["", "not stated", "n/a", "unknown", "none", "not mentioned", "no especificado"]
+
+            if not nombre_no_valido:
+                st.session_state["agent_name"] = nombre_detectado
+            elif agent_name_input and agent_name_input.strip():
+                st.session_state["agent_name"] = agent_name_input.strip()
+            else:
+                st.session_state["agent_name"] = "No especificado"
+
             st.session_state["audit_date"] = datetime.date.today().strftime("%d/%m/%Y")
 
             # 4. Preparar una sesión de chat nueva, usando un "cache" de contexto para no
