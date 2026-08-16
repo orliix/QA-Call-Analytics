@@ -133,6 +133,8 @@ if "agent_name" not in st.session_state:
     st.session_state["agent_name"] = None
 if "audit_date" not in st.session_state:
     st.session_state["audit_date"] = None
+if "processed_file_id" not in st.session_state:
+    st.session_state["processed_file_id"] = None
 if "chat_session" not in st.session_state:
     st.session_state["chat_session"] = None
 if "chat_messages" not in st.session_state:
@@ -148,7 +150,13 @@ agent_name_input = st.text_input("Nombre del agente auditado (opcional):", key="
 if uploaded_file is not None:
     st.audio(uploaded_file, format=uploaded_file.type)
 
-    if st.button("🚀 Procesar y Auditar Llamada", type="primary"):
+    current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+    ya_procesado = st.session_state["processed_file_id"] == current_file_id
+
+    if ya_procesado:
+        st.info("✅ Esta llamada ya fue procesada. Si quieres auditarla de nuevo, sube el archivo otra vez o elige uno distinto.")
+
+    if st.button("🚀 Procesar y Auditar Llamada", type="primary", disabled=ya_procesado):
         progress_bar = st.progress(0, text="Preparando archivo...")
 
         # Guardar el archivo temporalmente en disco local
@@ -230,6 +238,7 @@ Responde SIEMPRE basándote en esta información. Si te preguntan algo que no se
                     )
                 )
             st.session_state["chat_messages"] = []  # limpiar chat anterior si procesa una llamada nueva
+            st.session_state["processed_file_id"] = current_file_id
 
             progress_bar.progress(100, text="¡Listo!")
             time.sleep(0.5)
