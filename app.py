@@ -1,6 +1,7 @@
 import os
 import time
 import tempfile
+import datetime
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -71,56 +72,56 @@ SYSTEM_INSTRUCTIONS = """
    - Automatically detect the language(s) spoken in the call (e.g. Spanish, English, or a mix of both).
    - Transcribe each segment in the EXACT language it was spoken. Never translate — if the call switches languages mid-conversation (e.g. agent speaks English, customer replies in Spanish), preserve that switch faithfully.
    - Identify each distinct speaker and label them by their role based on context, not just "Speaker 1/2":
-       * "Agente" — the company representative handling the call.
-       * "Cliente" — the caller.
-       * Any additional participant gets its own clear label (e.g. "Cliente 2", "Supervisor", "Intérprete") if more than two people speak.
+       * "Agent" — the company representative handling the call.
+       * "Customer" — the caller.
+       * Any additional participant gets its own clear label (e.g. "Customer 2", "Supervisor", "Interpreter") if more than two people speak.
    - Insert accurate timestamps at key intervals or speaker changes formatted as [MM:SS].
    - Capture every spoken word verbatim in the original language without summarizing, shortening, or paraphrasing the dialogue.
-   - Flag any silence/dead air longer than 20 seconds directly inline in the transcript, e.g. "[Silencio - 25s]", at the point where it occurs.
+   - Flag any silence/dead air longer than 20 seconds directly inline in the transcript, e.g. "[Dead air - 25s]", at the point where it occurs.
 
-2. CALL OVERVIEW:
-   - Language(s) Detected: [e.g. "Español", "Inglés", or "Español e Inglés (mixto)"]
+2. CALL OVERVIEW (write this section in English, regardless of the language spoken on the call):
+   - Language(s) Detected: [e.g. "Spanish", "English", or "Spanish and English (mixed)"]
    - Reason for Call: 1-2 sentences summarizing the caller's main issue/request.
    - Resolution Provided: 1-2 sentences summarizing the outcome or next steps.
 
-3. SOFT SKILLS & CUSTOMER SERVICE ASSESSMENT:
-   Evaluate EACH item below individually. For each one, give a rating of "✅ Cumple", "⚠️ Parcial", "❌ No cumple", or "N/A" if it doesn't apply to this call, followed by a one-sentence justification (include a [MM:SS] timestamp reference when relevant):
+3. SOFT SKILLS & CUSTOMER SERVICE ASSESSMENT (write this entire section in English, regardless of the language spoken on the call):
+   Evaluate EACH item below individually. For each one, give a rating of "✅ Meets", "⚠️ Partial", "❌ Does Not Meet", or "N/A" if it doesn't apply to this call, followed by a one-sentence justification (include a [MM:SS] timestamp reference when relevant):
 
-   - **Profesionalismo durante toda la llamada:** ¿El agente mantuvo un trato profesional de principio a fin, sin excepciones?
-   - **Evitó jerga técnica (jargon):** ¿El agente explicó las cosas en lenguaje claro y accesible para el cliente?
-   - **Silencios muertos (dead air) mayores a 20 segundos:** Lista cada instancia detectada con su timestamp, o indica "Ninguno detectado".
-   - **Tono de voz:** Clasifica como "Cálido y amigable", "Aceptable/estándar", o "Deficiente" — y si el tono se mantuvo consistente durante toda la llamada.
-   - **Escucha activa:** ¿El agente mostró evidencia de escuchar activamente (parafraseo, confirmaciones, respuestas relevantes a lo dicho por el cliente)?
-   - **Calidad de audio / ruido de fondo:** ¿Hubo ruido de fondo notable o problemas de calidad de audio que afectaran la comunicación?
-   - **Expectativas de hold antes de una espera larga:** Si el agente puso al cliente en espera, ¿le explicó primero cuánto tiempo tomaría aproximadamente?
-   - **Agradecimiento tras el hold:** Al regresar de la espera, ¿el agente agradeció al cliente por su paciencia/tiempo de espera?
-   - **Protocolo de hold - check-in a los 3 minutos:** Si la espera superó los 3 minutos, ¿el agente regresó a la línea antes de ese punto para dar una actualización al cliente (aunque el asunto no estuviera resuelto aún)?
+   - **Professionalism Throughout the Call:** Did the agent maintain a professional demeanor from start to finish, without exception?
+   - **Avoided Jargon:** Did the agent explain things in clear, accessible language for the customer?
+   - **Dead Air Over 20 Seconds:** List each detected instance with its timestamp, or state "None detected".
+   - **Tone of Voice:** Classify as "Warm and friendly", "Acceptable/standard", or "Poor" — and note whether the tone stayed consistent throughout the call.
+   - **Active Listening:** Did the agent show evidence of active listening (paraphrasing, confirmations, responses relevant to what the customer said)?
+   - **Call Audio Quality / Background Noise:** Was there noticeable background noise or audio quality issues that affected communication?
+   - **Hold Time Expectations:** If the agent placed the customer on hold, did they first explain roughly how long it would take?
+   - **Thanked Customer After Hold:** Upon returning from hold, did the agent thank the customer for their patience/time on hold?
+   - **3-Minute Hold Check-in:** If the hold exceeded 3 minutes, did the agent check back in before that point to give the customer an update (even if the issue wasn't resolved yet)?
    - **De-escalation & Empathy:** Assess active listening, empathy, and control of the conversation during any tense moments.
-   - **Areas of Improvement:** 1-2 bullet points, or "Ninguna" si el manejo fue excepcional en todos los puntos anteriores.
+   - **Areas of Improvement:** 1-2 bullet points, or "None" if handled exceptionally on all points above.
 
 [REQUIRED TRANSCRIPTION OUTPUT SCHEMA]
 #### Transcript
-* **[00:00] Agente:** [Full verbatim dialogue in the language actually spoken]
-* **[00:05] Cliente:** [Full verbatim dialogue in the language actually spoken]
+* **[00:00] Agent:** [Full verbatim dialogue in the language actually spoken]
+* **[00:05] Customer:** [Full verbatim dialogue in the language actually spoken]
 *(Continue for the ENTIRE duration of the call, using the correct role label for each speaker)*
 
 ---
 
 #### Call Overview
-* **Idioma(s) detectado(s):** [Detected language(s)]
+* **Language(s) Detected:** [Detected language(s)]
 * **Reason for Call:** [Summary]
 * **Resolution Provided:** [Outcome]
 
 #### Soft Skills & Customer Service Assessment
-* **Profesionalismo durante toda la llamada:** [Rating + justificación]
-* **Evitó jerga técnica:** [Rating + justificación]
-* **Silencios muertos (>20s):** [Lista de instancias o "Ninguno detectado"]
-* **Tono de voz:** [Clasificación + consistencia]
-* **Escucha activa:** [Rating + justificación]
-* **Calidad de audio / ruido de fondo:** [Rating + justificación]
-* **Expectativas de hold:** [Rating + justificación]
-* **Agradecimiento tras el hold:** [Rating + justificación]
-* **Check-in a los 3 minutos de hold:** [Rating + justificación]
+* **Professionalism Throughout the Call:** [Rating + justification]
+* **Avoided Jargon:** [Rating + justification]
+* **Dead Air (>20s):** [List of instances or "None detected"]
+* **Tone of Voice:** [Classification + consistency]
+* **Active Listening:** [Rating + justification]
+* **Call Audio Quality / Background Noise:** [Rating + justification]
+* **Hold Time Expectations:** [Rating + justification]
+* **Thanked Customer After Hold:** [Rating + justification]
+* **3-Minute Hold Check-in:** [Rating + justification]
 * **De-escalation & Empathy:** [Evaluation]
 * **Areas of Improvement:** [Bullet points]
 """
@@ -128,6 +129,10 @@ SYSTEM_INSTRUCTIONS = """
 # --- Espacio en memoria de la sesión: aquí se guarda el reporte y el chat ---
 if "report" not in st.session_state:
     st.session_state["report"] = None
+if "agent_name" not in st.session_state:
+    st.session_state["agent_name"] = None
+if "audit_date" not in st.session_state:
+    st.session_state["audit_date"] = None
 if "chat_session" not in st.session_state:
     st.session_state["chat_session"] = None
 if "chat_messages" not in st.session_state:
@@ -137,6 +142,8 @@ uploaded_file = st.file_uploader(
     "Selecciona un archivo de audio (.mp3, .wav, .m4a, .aac, .ogg, .flac, .aiff)", 
     type=["mp3", "wav", "m4a", "aac", "ogg", "flac", "aiff", "aif"]
 )
+
+agent_name_input = st.text_input("Nombre del agente auditado (opcional):", key="agent_name_input")
 
 if uploaded_file is not None:
     st.audio(uploaded_file, format=uploaded_file.type)
@@ -183,6 +190,8 @@ if uploaded_file is not None:
 
             # 3. Guardar el reporte en la sesión (para que no se pierda al interactuar después)
             st.session_state["report"] = response.text
+            st.session_state["agent_name"] = agent_name_input.strip() if agent_name_input else "No especificado"
+            st.session_state["audit_date"] = datetime.date.today().strftime("%d/%m/%Y")
 
             # 4. Preparar una sesión de chat nueva, usando un "cache" de contexto para no
             #    tener que reenviar (ni volver a cobrar) toda la transcripción en cada pregunta.
@@ -244,11 +253,19 @@ Responde SIEMPRE basándote en esta información. Si te preguntan algo que no se
 # --- Mostrar el reporte y el botón de descarga (persiste aunque interactúes con el chat) ---
 if st.session_state["report"]:
     st.success("✅ ¡Auditoría completada exitosamente!")
+
+    encabezado_reporte = (
+        f"**Audited Agent:** {st.session_state['agent_name']}  \n"
+        f"**Audit Date:** {st.session_state['audit_date']}"
+    )
+    st.info(encabezado_reporte)
     st.markdown(st.session_state["report"])
+
+    reporte_para_descargar = f"{encabezado_reporte.replace('  ', '')}\n\n{st.session_state['report']}"
 
     st.download_button(
         label="📥 Descargar Reporte de QA (.txt)",
-        data=st.session_state["report"],
+        data=reporte_para_descargar,
         file_name="Reporte_QA.txt",
         mime="text/plain"
     )
