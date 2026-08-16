@@ -1,0 +1,25 @@
+name: Ejecutar script
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # Permite ejecutarlo manualmente desde GitHub
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Ejecutar script usando el Secret
+        env:
+          MY_TOKEN: ${{ secrets.ORLIIS_SECRET_TOKEN }}
+        run: |
+          echo "El token está configurado correctamente"
