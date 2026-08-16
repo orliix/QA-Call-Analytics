@@ -74,10 +74,7 @@ def sanitizar_para_nombre_archivo(texto):
 
 
 def enviar_a_google_keep(titulo, contenido, tags=["QA", "Evaluacion"]):
-    """
-    Guarda el reporte en Google Keep. Incluye un failsafe que fragmenta
-    el contenido en notas encadenadas si supera los 18,000 caracteres.
-    """
+    """Guarda el reporte en Google Keep dividiendo notas si superan el límite."""
     try:
         keep = gkeepapi.Keep()
         username = st.secrets["KEEP_USER"]
@@ -122,7 +119,7 @@ def enviar_a_google_keep(titulo, contenido, tags=["QA", "Evaluacion"]):
                 note.addLabel(lbl)
 
         keep.sync()
-        return True, f"Guardado en Google Keep exitosamente ({total_partes} nota(s))."
+        return True, f"Guardado en Google Keep ({total_partes} nota(s))."
     except Exception as e:
         return False, f"Error al guardar en Keep: {str(e)}"
 
@@ -191,7 +188,6 @@ SYSTEM_INSTRUCTIONS = """
 * **Areas of Improvement:** [Bullet points]
 """
 
-# --- Espacio en memoria de la sesión ---
 if "report" not in st.session_state:
     st.session_state["report"] = None
 if "agent_name" not in st.session_state:
@@ -277,15 +273,13 @@ if uploaded_file is not None:
 
             st.session_state["audit_date"] = datetime.date.today().strftime("%d/%m/%Y")
 
-            # Guardar en Google Keep
+            # Sincronización con Google Keep
             titulo_keep = f"{st.session_state['audit_date']} - {st.session_state['agent_name']} - Audit"
             exito_keep, msg_keep = enviar_a_google_keep(titulo_keep, response.text)
             if exito_keep:
                 st.toast(f"📝 {msg_keep}", icon="✅")
             else:
                 st.toast(f"⚠️ {msg_keep}", icon="⚠️")
-
-            progress_bar.progress(85, text="Preparando el asistente de chat...")
 
             chat_system_instruction = f"""Eres un asistente que ayuda a un evaluador de calidad a discutir una llamada de servicio al cliente.
 Ya existe una transcripción completa y una evaluación de soft skills de esta llamada, que se muestra a continuación.
