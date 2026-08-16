@@ -23,15 +23,26 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- Helper para obtener secrets de Streamlit o variables de entorno (GitHub Actions/OS) ---
+def get_secret(key, default=None):
+    if key in st.secrets:
+        return st.secrets[key]
+    return os.getenv(key, default)
+
 # --- Pantalla de contraseña ---
 def password_entered():
-    if st.session_state["password_input"] == st.secrets["APP_PASSWORD"]:
+    app_password = get_secret("APP_PASSWORD")
+    if app_password and st.session_state["password_input"] == app_password:
         st.session_state["autenticado"] = True
         del st.session_state["password_input"]
     else:
         st.session_state["autenticado"] = False
 
 def check_password():
+    # Si no se configuró contraseña en Secrets/Env, se permite el acceso directo
+    if not get_secret("APP_PASSWORD"):
+        return True
+
     if st.session_state.get("autenticado", False):
         return True
 
@@ -53,7 +64,12 @@ with st.sidebar:
     st.header("⚙️ Configuración")
     st.info("🔒 Tus archivos de audio se analizan y se ELIMINAN automáticamente de los servidores al finalizar el proceso.")
 
-api_key = st.secrets["GEMINI_API_KEY"]
+# Obtención de claves desde st.secrets o variables de entorno (soporta GH_PAT / MY_TOKEN)
+api_key = get_secret("GEMINI_API_KEY") or get_secret("MY_TOKEN") or get_secret("ORLIIS_SECRET_TOKEN")
+
+if not api_key:
+    st.error("⚠️ No se encontró la API Key de Gemini. Configúrala en `secrets.toml` o como variable de entorno.")
+    st.stop()
 
 if "client" not in st.session_state:
     st.session_state["client"] = genai.Client(
@@ -77,16 +93,16 @@ def enviar_a_google_keep(titulo, contenido, tags=["QA", "Evaluacion"]):
     """Guarda el reporte en Google Keep dividiendo notas si superan el límite."""
     try:
         keep = gkeepapi.Keep()
-        username = st.secrets["KEEP_USER"]
-        password = st.secrets.get("KEEP_PASSWORD", None)
-        master_token = st.secrets.get("KEEP_MASTER_TOKEN", None)
+        username = get_secret("KEEP_USER")
+        password = get_secret("KEEP_PASSWORD")
+        master_token = get_secret("KEEP_MASTER_TOKEN")
 
         if master_token:
             keep.resume(username, master_token)
         elif password:
             keep.login(username, password)
         else:
-            return False, "No se encontraron credenciales de Keep en st.secrets."
+            return False, "No se encontraron credenciales de Keep en st.secrets ni variables de entorno."
 
         max_len = 18000
         if len(contenido) <= max_len:
