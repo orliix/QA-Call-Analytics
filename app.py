@@ -1,8 +1,11 @@
 import os
+import re
 import time
+import base64
 import tempfile
 import datetime
 import streamlit as st
+import streamlit.components.v1 as components
 from google import genai
 from google.genai import types
 
@@ -63,6 +66,13 @@ if "client" not in st.session_state:
 client = st.session_state["client"]
 
 MODEL_NAME = 'gemini-3.1-flash-lite'
+
+
+def sanitizar_para_nombre_archivo(texto):
+    """Convierte texto libre en algo seguro para usar como nombre de archivo."""
+    texto = re.sub(r'[^A-Za-z0-9_\-]+', '_', texto)
+    texto = texto.strip('_')
+    return texto if texto else "Agente"
 
 SYSTEM_INSTRUCTIONS = """
 [AGENT IDENTITY] You are a dedicated, verbatim Call Transcription Engine and Quality Specialist. Your persistent primary directive is to process provided call audio files into clean, accurate, and structured output.
@@ -135,6 +145,10 @@ if "audit_date" not in st.session_state:
     st.session_state["audit_date"] = None
 if "processed_file_id" not in st.session_state:
     st.session_state["processed_file_id"] = None
+if "download_filename" not in st.session_state:
+    st.session_state["download_filename"] = "Reporte_QA.txt"
+if "download_content" not in st.session_state:
+    st.session_state["download_content"] = ""
 if "chat_session" not in st.session_state:
     st.session_state["chat_session"] = None
 if "chat_messages" not in st.session_state:
@@ -240,6 +254,35 @@ Responde SIEMPRE basándote en esta información. Si te preguntan algo que no se
             st.session_state["chat_messages"] = []  # limpiar chat anterior si procesa una llamada nueva
             st.session_state["processed_file_id"] = current_file_id
 
+            # 5. Armar el nombre del archivo (Agente_Fecha) y el contenido a descargar
+            nombre_agente_archivo = sanitizar_para_nombre_archivo(st.session_state["agent_name"])
+            fecha_archivo = st.session_state["audit_date"].replace("/", "-")
+            nombre_archivo = f"Reporte_QA_{nombre_agente_archivo}_{fecha_archivo}.txt"
+
+            encabezado_txt = (
+                f"Audited Agent: {st.session_state['agent_name']}\n"
+                f"Audit Date: {st.session_state['audit_date']}\n\n"
+            )
+            contenido_descarga = encabezado_txt + response.text
+
+            st.session_state["download_filename"] = nombre_archivo
+            st.session_state["download_content"] = contenido_descarga
+
+            # 6. Descarga automática: se dispara sola, sin necesidad de darle clic al botón
+            b64_contenido = base64.b64encode(contenido_descarga.encode("utf-8")).decode()
+            components.html(
+                f"""
+                <html><body>
+                <a id="auto_download_link" href="data:text/plain;charset=utf-8;base64,{b64_contenido}" download="{nombre_archivo}"></a>
+                <script>
+                    document.getElementById('auto_download_link').click();
+                </script>
+                </body></html>
+                """,
+                height=0,
+                width=0,
+            )
+
             progress_bar.progress(100, text="¡Listo!")
             time.sleep(0.5)
             progress_bar.empty()
@@ -261,7 +304,7 @@ Responde SIEMPRE basándote en esta información. Si te preguntan algo que no se
 
 # --- Mostrar el reporte y el botón de descarga (persiste aunque interactúes con el chat) ---
 if st.session_state["report"]:
-    st.success("✅ ¡Auditoría completada exitosamente!")
+    st.success("✅ ¡Auditoría completada exitosamente! La descarga del reporte debió iniciar automáticamente.")
 
     encabezado_reporte = (
         f"**Audited Agent:** {st.session_state['agent_name']}  \n"
@@ -270,12 +313,10 @@ if st.session_state["report"]:
     st.info(encabezado_reporte)
     st.markdown(st.session_state["report"])
 
-    reporte_para_descargar = f"{encabezado_reporte.replace('  ', '')}\n\n{st.session_state['report']}"
-
     st.download_button(
-        label="📥 Descargar Reporte de QA (.txt)",
-        data=reporte_para_descargar,
-        file_name="Reporte_QA.txt",
+        label="📥 Volver a descargar el Reporte de QA (.txt)",
+        data=st.session_state["download_content"],
+        file_name=st.session_state["download_filename"],
         mime="text/plain"
     )
 
