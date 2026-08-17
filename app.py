@@ -330,60 +330,69 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
                 width=0,
             )
 
-try:
-    # Validar que los secrets de Dropbox existen
-    dbx_app_key = st.secrets.get("DROPBOX_APP_KEY")
-    dbx_app_secret = st.secrets.get("DROPBOX_APP_SECRET")
-    dbx_refresh = st.secrets.get("DROPBOX_REFRESH_TOKEN")
+            # 7. Subir automáticamente el reporte a Dropbox (si ya configuraste tus secrets de Dropbox)
+            # Usamos un try interno para manejar fallos de Dropbox, sin romper el try exterior.
+            try:
+                # Validar que los secrets de Dropbox existen
+                dbx_app_key = st.secrets.get("DROPBOX_APP_KEY")
+                dbx_app_secret = st.secrets.get("DROPBOX_APP_SECRET")
+                dbx_refresh = st.secrets.get("DROPBOX_REFRESH_TOKEN")
 
-    if not (dbx_app_key and dbx_app_secret and dbx_refresh):
-        raise KeyError("Faltan DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN en st.secrets")
+                if not (dbx_app_key and dbx_app_secret and dbx_refresh):
+                    raise KeyError("Faltan DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN en st.secrets")
 
-    # Crear el cliente una sola vez por sesión
-    if "dbx_client" not in st.session_state:
-        st.session_state["dbx_client"] = dropbox.Dropbox(
-            app_key=dbx_app_key,
-            app_secret=dbx_app_secret,
-            oauth2_refresh_token=dbx_refresh
-        )
+                # Crear el cliente una sola vez por sesión
+                if "dbx_client" not in st.session_state:
+                    st.session_state["dbx_client"] = dropbox.Dropbox(
+                        app_key=dbx_app_key,
+                        app_secret=dbx_app_secret,
+                        oauth2_refresh_token=dbx_refresh
+                    )
 
-    # Opcional: verificar la cuenta para depuración
-    try:
-        acct = st.session_state["dbx_client"].users_get_current_account()
-        st.info(f"Dropbox conectado como: {acct.email}")
-    except Exception as e:
-        st.warning(f"No se pudo verificar la cuenta de Dropbox: {e}")
+                # Opcional: verificar la cuenta para depuración
+                try:
+                    acct = st.session_state["dbx_client"].users_get_current_account()
+                    st.info(f"Dropbox conectado como: {acct.email}")
+                except Exception as e:
+                    st.warning(f"No se pudo verificar la cuenta de Dropbox: {e}")
 
-    # Subir el fichero: use WriteMode.add para que Dropbox genere copias si ya existe
-    metadata = st.session_state["dbx_client"].files_upload(
-        contenido_descarga.encode("utf-8"),
-        f"/{nombre_archivo}",
-        mode=dropbox.files.WriteMode.add,
-        autorename=True
-    )
+                # Subir el fichero: use WriteMode.add para que Dropbox genere copias si ya existe
+                metadata = st.session_state["dbx_client"].files_upload(
+                    contenido_descarga.encode("utf-8"),
+                    f"/{nombre_archivo}",
+                    mode=dropbox.files.WriteMode.add,
+                    autorename=True
+                )
 
-    st.toast(f"☁️ Reporte subido a tu Dropbox correctamente ({metadata.name}).", icon="✅")
+                st.toast(f"☁️ Reporte subido a tu Dropbox correctamente ({metadata.name}).", icon="✅")
 
-except KeyError as ke:
-    st.error(f"Dropbox no configurado en secrets: {ke}")
-except Exception as e:
-    # Mostrar la excepción completa para depuración
-    st.warning(f"No se pudo subir el reporte a Dropbox: {e}")
+            except KeyError as ke:
+                # Dropbox no configurado en secrets; informar sin romper la app
+                st.info(f"Dropbox no configurado en secrets: {ke}")
+            except Exception as e:
+                # Mostrar la excepción completa para depuración
+                st.warning(f"No se pudo subir el reporte a Dropbox: {e}")
 
-# --- Cierre del try exterior que envuelve todo el procesamiento ---
-except Exception as e:
-    progress_bar.empty()
-    st.error(f"Ocurrió un error al procesar el audio: {str(e)}")
-finally:
-    if google_audio_file:
-        try:
-            client.files.delete(name=google_audio_file.name)
-            st.toast("🛡️ El archivo de audio fue eliminado permanentemente de los servidores de Google.", icon="🔒")
-        except Exception:
-            pass
+            progress_bar.progress(100, text="¡Listo!")
+            time.sleep(0.5)
+            progress_bar.empty()
 
-    if os.path.exists(tmp_path):
-        os.remove(tmp_path)
+        except Exception as e:
+            # Except del try exterior (procesamiento completo)
+            progress_bar.empty()
+            st.error(f"Ocurrió un error al procesar el audio: {str(e)}")
+
+        finally:
+            # Cleanup: borrar el archivo subido a Gemini si existe y el tmp local
+            if google_audio_file:
+                try:
+                    client.files.delete(name=google_audio_file.name)
+                    st.toast("🛡️ El archivo de audio fue eliminado permanentemente de los servidores de Google.", icon="🔒")
+                except Exception:
+                    pass
+
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
 # --- Mostrar el reporte y el botón de descarga (persiste aunque interactúes con el chat) ---
 if st.session_state["report"]:
