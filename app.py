@@ -331,23 +331,46 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
             )
 
             # 7. Subir automáticamente el reporte a Dropbox (si ya configuraste tus secrets de Dropbox)
-            try:
-                if "dbx_client" not in st.session_state:
-                    st.session_state["dbx_client"] = dropbox.Dropbox(
-                        app_key=st.secrets["DROPBOX_APP_KEY"],
-                        app_secret=st.secrets["DROPBOX_APP_SECRET"],
-                        oauth2_refresh_token=st.secrets["DROPBOX_REFRESH_TOKEN"]
-                    )
-                st.session_state["dbx_client"].files_upload(
-                    contenido_descarga.encode("utf-8"),
-                    f"/{nombre_archivo}",
-                    mode=dropbox.files.WriteMode("add")
-                )
-                st.toast("☁️ Reporte subido a tu Dropbox correctamente.", icon="✅")
-            except KeyError:
-                pass  # Dropbox aún no está configurado en los secrets; no hacemos nada
-            except Exception as e:
-                st.warning(f"No se pudo subir el reporte a Dropbox: {str(e)}")
+try:
+    # Asegurarnos de que los secrets existen
+    dbx_app_key = st.secrets.get("DROPBOX_APP_KEY")
+    dbx_app_secret = st.secrets.get("DROPBOX_APP_SECRET")
+    dbx_refresh = st.secrets.get("DROPBOX_REFRESH_TOKEN")
+
+    if not (dbx_app_key and dbx_app_secret and dbx_refresh):
+        raise KeyError("Faltan DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN en st.secrets")
+
+    # Crear el cliente una sola vez por sesión
+    if "dbx_client" not in st.session_state:
+        st.session_state["dbx_client"] = dropbox.Dropbox(
+            app_key=dbx_app_key,
+            app_secret=dbx_app_secret,
+            oauth2_refresh_token=dbx_refresh
+        )
+
+    # Probar la conexión (devuelve información de la cuenta)
+    try:
+        acct = st.session_state["dbx_client"].users_get_current_account()
+        st.info(f"Dropbox conectado como: {acct.email}")
+    except Exception as e:
+        st.warning(f"No se pudo verificar la cuenta de Dropbox: {e}")
+
+    # Subir el fichero: use WriteMode.add para que Dropbox genere copias si ya existe
+    metadata = st.session_state["dbx_client"].files_upload(
+        contenido_descarga.encode("utf-8"),
+        f"/{nombre_archivo}",
+        mode=dropbox.files.WriteMode.add,
+        autorename=True  # extra seguro: pide autorename en caso de conflicto
+    )
+
+    # metadata.name contiene el nombre real que quedó (puede haber sido renombrado)
+    st.toast(f"☁️ Reporte subido a tu Dropbox correctamente ({metadata.name}).", icon="✅")
+
+except KeyError as ke:
+    st.error(f"Dropbox no configurado en secrets: {ke}")
+except Exception as e:
+    # Mostrar la excepción completa para depuración
+    st.warning(f"No se pudo subir el reporte a Dropbox: {e}")
 
             progress_bar.progress(100, text="¡Listo!")
             time.sleep(0.5)
