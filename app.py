@@ -330,8 +330,6 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
                 width=0,
             )
 
-
-# 7. Subir automáticamente el reporte a Dropbox (si ya configuraste tus secrets de Dropbox)
 try:
     # Validar que los secrets de Dropbox existen
     dbx_app_key = st.secrets.get("DROPBOX_APP_KEY")
