@@ -341,7 +341,7 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
                 st.session_state["dbx_client"].files_upload(
                     contenido_descarga.encode("utf-8"),
                     f"/{nombre_archivo}",
-                    mode=dropbox.files.WriteMode("overwrite")
+                    mode=dropbox.files.WriteMode("add")
                 )
                 st.toast("☁️ Reporte subido a tu Dropbox correctamente.", icon="✅")
             except KeyError:
