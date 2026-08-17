@@ -330,9 +330,9 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
                 width=0,
             )
 
-            # 7. Subir automáticamente el reporte a Dropbox (si ya configuraste tus secrets de Dropbox)
+# 7. Subir automáticamente el reporte a Dropbox (si ya configuraste tus secrets de Dropbox)
 try:
-    # Asegurarnos de que los secrets existen
+    # Validar que los secrets de Dropbox existen
     dbx_app_key = st.secrets.get("DROPBOX_APP_KEY")
     dbx_app_secret = st.secrets.get("DROPBOX_APP_SECRET")
     dbx_refresh = st.secrets.get("DROPBOX_REFRESH_TOKEN")
@@ -348,7 +348,7 @@ try:
             oauth2_refresh_token=dbx_refresh
         )
 
-    # Probar la conexión (devuelve información de la cuenta)
+    # Opcional: verificar la cuenta para depuración
     try:
         acct = st.session_state["dbx_client"].users_get_current_account()
         st.info(f"Dropbox conectado como: {acct.email}")
@@ -360,10 +360,9 @@ try:
         contenido_descarga.encode("utf-8"),
         f"/{nombre_archivo}",
         mode=dropbox.files.WriteMode.add,
-        autorename=True  # extra seguro: pide autorename en caso de conflicto
+        autorename=True
     )
 
-    # metadata.name contiene el nombre real que quedó (puede haber sido renombrado)
     st.toast(f"☁️ Reporte subido a tu Dropbox correctamente ({metadata.name}).", icon="✅")
 
 except KeyError as ke:
