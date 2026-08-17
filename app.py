@@ -330,6 +330,7 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
                 width=0,
             )
 
+
 # 7. Subir automáticamente el reporte a Dropbox (si ya configuraste tus secrets de Dropbox)
 try:
     # Validar que los secrets de Dropbox existen
@@ -371,24 +372,20 @@ except Exception as e:
     # Mostrar la excepción completa para depuración
     st.warning(f"No se pudo subir el reporte a Dropbox: {e}")
 
-            progress_bar.progress(100, text="¡Listo!")
-            time.sleep(0.5)
-            progress_bar.empty()
+# --- Cierre del try exterior que envuelve todo el procesamiento ---
+except Exception as e:
+    progress_bar.empty()
+    st.error(f"Ocurrió un error al procesar el audio: {str(e)}")
+finally:
+    if google_audio_file:
+        try:
+            client.files.delete(name=google_audio_file.name)
+            st.toast("🛡️ El archivo de audio fue eliminado permanentemente de los servidores de Google.", icon="🔒")
+        except Exception:
+            pass
 
-        except Exception as e:
-            progress_bar.empty()
-            st.error(f"Ocurrió un error al procesar el audio: {str(e)}")
-
-        finally:
-            if google_audio_file:
-                try:
-                    client.files.delete(name=google_audio_file.name)
-                    st.toast("🛡️ El archivo de audio fue eliminado permanentemente de los servidores de Google.", icon="🔒")
-                except Exception:
-                    pass
-
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
 
 # --- Mostrar el reporte y el botón de descarga (persiste aunque interactúes con el chat) ---
 if st.session_state["report"]:
