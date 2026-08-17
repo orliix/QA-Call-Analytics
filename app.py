@@ -6,7 +6,8 @@ import tempfile
 import datetime
 import streamlit as st
 import streamlit.components.v1 as components
-import gkeepapi
+import dropbox
+from dropbox import DropboxOAuth2FlowNoRedirect
 from google import genai
 from google.genai import types
 
@@ -23,26 +24,15 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Helper para obtener secrets de Streamlit o variables de entorno (GitHub Actions/OS) ---
-def get_secret(key, default=None):
-    if key in st.secrets:
-        return st.secrets[key]
-    return os.getenv(key, default)
-
 # --- Pantalla de contraseña ---
 def password_entered():
-    app_password = get_secret("APP_PASSWORD")
-    if app_password and st.session_state["password_input"] == app_password:
+    if st.session_state["password_input"] == st.secrets["APP_PASSWORD"]:
         st.session_state["autenticado"] = True
         del st.session_state["password_input"]
     else:
         st.session_state["autenticado"] = False
 
 def check_password():
-    # Si no se configuró contraseña en Secrets/Env, se permite el acceso directo
-    if not get_secret("APP_PASSWORD"):
-        return True
-
     if st.session_state.get("autenticado", False):
         return True
 
@@ -64,13 +54,40 @@ with st.sidebar:
     st.header("⚙️ Configuración")
     st.info("🔒 Tus archivos de audio se analizan y se ELIMINAN automáticamente de los servidores al finalizar el proceso.")
 
-# Obtención de claves desde st.secrets o variables de entorno (soporta GH_PAT / MY_TOKEN)
-api_key = get_secret("GEMINI_API_KEY") or get_secret("MY_TOKEN") or get_secret("ORLIIS_SECRET_TOKEN")
+    with st.expander("🔗 Conectar Dropbox (solo la primera vez)"):
+        st.caption("Usa esto una sola vez para obtener tu Refresh Token de Dropbox. Después lo guardas en tus Secrets de Streamlit y ya no necesitas volver a abrir esto.")
 
-if not api_key:
-    st.error("⚠️ No se encontró la API Key de Gemini. Configúrala en `secrets.toml` o como variable de entorno.")
-    st.stop()
+        dbx_app_key_temp = st.text_input("App Key de Dropbox", key="dbx_app_key_temp")
+        dbx_app_secret_temp = st.text_input("App Secret de Dropbox", type="password", key="dbx_app_secret_temp")
 
+        if dbx_app_key_temp and dbx_app_secret_temp:
+            if st.button("1️⃣ Generar link de autorización"):
+                st.session_state["dbx_oauth_flow"] = DropboxOAuth2FlowNoRedirect(
+                    dbx_app_key_temp,
+                    dbx_app_secret_temp,
+                    token_access_type="offline"
+                )
+                st.session_state["dbx_auth_url"] = st.session_state["dbx_oauth_flow"].start()
+
+            if "dbx_auth_url" in st.session_state:
+                st.markdown(f"[👉 Haz clic aquí para autorizar Dropbox]({st.session_state['dbx_auth_url']})")
+                st.caption("Inicia sesión, dale 'Allow', y Dropbox te va a mostrar un código. Cópialo y pégalo aquí abajo:")
+
+                codigo_dbx = st.text_input("Código de autorización de Dropbox:", key="dbx_auth_code")
+
+                if codigo_dbx and st.button("2️⃣ Obtener Refresh Token"):
+                    try:
+                        resultado_oauth = st.session_state["dbx_oauth_flow"].finish(codigo_dbx.strip())
+                        st.success("¡Listo! Copia este Refresh Token y guárdalo en tus Secrets de Streamlit como DROPBOX_REFRESH_TOKEN:")
+                        st.code(resultado_oauth.refresh_token)
+                    except Exception as e:
+                        st.error(f"No se pudo obtener el token: {str(e)}")
+
+# La API Key ya no se escribe a mano: se lee de los secretos de Streamlit Cloud
+api_key = st.secrets["GEMINI_API_KEY"]
+
+# Configurar el cliente oficial UNA SOLA VEZ y guardarlo en la sesión.
+# (Si se crea uno nuevo en cada interacción, el chat se queda sin conexión y falla)
 if "client" not in st.session_state:
     st.session_state["client"] = genai.Client(
         api_key=api_key,
@@ -87,58 +104,6 @@ def sanitizar_para_nombre_archivo(texto):
     texto = re.sub(r'[^A-Za-z0-9_\-]+', '_', texto)
     texto = texto.strip('_')
     return texto if texto else "Agente"
-
-
-def enviar_a_google_keep(titulo, contenido, tags=["QA", "Evaluacion"]):
-    """Guarda el reporte en Google Keep dividiendo notas si superan el límite."""
-    try:
-        keep = gkeepapi.Keep()
-        username = get_secret("KEEP_USER")
-        password = get_secret("KEEP_PASSWORD")
-        master_token = get_secret("KEEP_MASTER_TOKEN")
-
-        if master_token:
-            keep.resume(username, master_token)
-        elif password:
-            keep.login(username, password)
-        else:
-            return False, "No se encontraron credenciales de Keep en st.secrets ni variables de entorno."
-
-        max_len = 18000
-        if len(contenido) <= max_len:
-            partes = [contenido]
-        else:
-            partes = []
-            lineas = contenido.split("\n")
-            bloque_actual = ""
-            for linea in lineas:
-                if len(bloque_actual) + len(linea) + 1 > max_len:
-                    partes.append(bloque_actual)
-                    bloque_actual = linea + "\n"
-                else:
-                    bloque_actual += linea + "\n"
-            if bloque_actual.strip():
-                partes.append(bloque_actual)
-
-        total_partes = len(partes)
-        keep_labels = []
-        for tag in tags:
-            label = keep.findLabel(tag)
-            if not label:
-                label = keep.createLabel(tag)
-            keep_labels.append(label)
-
-        for i, parte in enumerate(partes, 1):
-            sub_titulo = titulo if total_partes == 1 else f"[{i}/{total_partes}] {titulo}"
-            note = keep.createNote(sub_titulo, parte)
-            for lbl in keep_labels:
-                note.addLabel(lbl)
-
-        keep.sync()
-        return True, f"Guardado en Google Keep ({total_partes} nota(s))."
-    except Exception as e:
-        return False, f"Error al guardar en Keep: {str(e)}"
-
 
 SYSTEM_INSTRUCTIONS = """
 [AGENT IDENTITY] You are a dedicated, verbatim Call Transcription Engine and Quality Specialist. Your persistent primary directive is to process provided call audio files into clean, accurate, and structured output.
@@ -204,6 +169,7 @@ SYSTEM_INSTRUCTIONS = """
 * **Areas of Improvement:** [Bullet points]
 """
 
+# --- Espacio en memoria de la sesión: aquí se guarda el reporte y el chat ---
 if "report" not in st.session_state:
     st.session_state["report"] = None
 if "agent_name" not in st.session_state:
@@ -240,6 +206,7 @@ if uploaded_file is not None:
     if st.button("🚀 Procesar y Auditar Llamada", type="primary", disabled=ya_procesado):
         progress_bar = st.progress(0, text="Preparando archivo...")
 
+        # Guardar el archivo temporalmente en disco local
         with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp_file:
             tmp_file.write(uploaded_file.getvalue())
             tmp_path = tmp_file.name
@@ -248,9 +215,11 @@ if uploaded_file is not None:
         max_intentos = 3
 
         try:
+            # 1. Subir audio usando el cliente
             progress_bar.progress(20, text="Subiendo audio a Gemini...")
             google_audio_file = client.files.upload(file=tmp_path)
 
+            # 2. Generar el contenido, con reintentos automáticos si el servidor está ocupado
             progress_bar.progress(45, text="Analizando la llamada (transcripción y evaluación)...")
             response = None
             for intento in range(1, max_intentos + 1):
@@ -272,10 +241,13 @@ if uploaded_file is not None:
                     else:
                         raise
 
-            progress_bar.progress(75, text="Preparando el reporte y sincronizando con Google Keep...")
+            progress_bar.progress(80, text="Preparando el reporte y el asistente de chat...")
 
+            # 3. Guardar el reporte en la sesión (para que no se pierda al interactuar después)
             st.session_state["report"] = response.text
 
+            # Intentar extraer el nombre del agente que la IA detectó en la llamada.
+            # Prioridad: 1) nombre detectado por la IA, 2) nombre escrito en la caja, 3) "No especificado"
             coincidencia_nombre = re.search(r"Agent Name.*?:\*\*\s*(.+)", response.text)
             nombre_detectado = coincidencia_nombre.group(1).strip() if coincidencia_nombre else ""
             nombre_no_valido = nombre_detectado.lower() in ["", "not stated", "n/a", "unknown", "none", "not mentioned", "no especificado"]
@@ -289,14 +261,8 @@ if uploaded_file is not None:
 
             st.session_state["audit_date"] = datetime.date.today().strftime("%d/%m/%Y")
 
-            # Sincronización con Google Keep
-            titulo_keep = f"{st.session_state['audit_date']} - {st.session_state['agent_name']} - Audit"
-            exito_keep, msg_keep = enviar_a_google_keep(titulo_keep, response.text)
-            if exito_keep:
-                st.toast(f"📝 {msg_keep}", icon="✅")
-            else:
-                st.toast(f"⚠️ {msg_keep}", icon="⚠️")
-
+            # 4. Preparar una sesión de chat nueva, usando un "cache" de contexto para no
+            #    tener que reenviar (ni volver a cobrar) toda la transcripción en cada pregunta.
             chat_system_instruction = f"""Eres un asistente que ayuda a un evaluador de calidad a discutir una llamada de servicio al cliente.
 Ya existe una transcripción completa y una evaluación de soft skills de esta llamada, que se muestra a continuación.
 Responde SIEMPRE basándote en esta información. Si te preguntan algo que no se puede saber a partir de la transcripción, dilo claramente.
@@ -307,6 +273,7 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
 === FIN DE LA TRANSCRIPCIÓN ===
 """
             try:
+                # Guardamos la transcripción una sola vez en un cache (dura 1 hora)
                 cache = client.caches.create(
                     model=MODEL_NAME,
                     config=types.CreateCachedContentConfig(
@@ -322,6 +289,8 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
                     )
                 )
             except Exception:
+                # Si la llamada es muy corta, puede no alcanzar el mínimo de texto para cachear.
+                # En ese caso, seguimos funcionando igual, solo que sin el ahorro del cache.
                 st.session_state["chat_session"] = client.chats.create(
                     model=MODEL_NAME,
                     config=types.GenerateContentConfig(
@@ -329,10 +298,10 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
                         temperature=0.3
                     )
                 )
-
-            st.session_state["chat_messages"] = []
+            st.session_state["chat_messages"] = []  # limpiar chat anterior si procesa una llamada nueva
             st.session_state["processed_file_id"] = current_file_id
 
+            # 5. Armar el nombre del archivo (Agente_Fecha) y el contenido a descargar
             nombre_agente_archivo = sanitizar_para_nombre_archivo(st.session_state["agent_name"])
             fecha_archivo = st.session_state["audit_date"].replace("/", "-")
             nombre_archivo = f"Reporte_QA_{nombre_agente_archivo}_{fecha_archivo}.txt"
@@ -346,6 +315,7 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
             st.session_state["download_filename"] = nombre_archivo
             st.session_state["download_content"] = contenido_descarga
 
+            # 6. Descarga automática local: se dispara sola, sin necesidad de darle clic al botón
             b64_contenido = base64.b64encode(contenido_descarga.encode("utf-8")).decode()
             components.html(
                 f"""
@@ -359,6 +329,25 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
                 height=0,
                 width=0,
             )
+
+            # 7. Subir automáticamente el reporte a Dropbox (si ya configuraste tus secrets de Dropbox)
+            try:
+                if "dbx_client" not in st.session_state:
+                    st.session_state["dbx_client"] = dropbox.Dropbox(
+                        app_key=st.secrets["DROPBOX_APP_KEY"],
+                        app_secret=st.secrets["DROPBOX_APP_SECRET"],
+                        oauth2_refresh_token=st.secrets["DROPBOX_REFRESH_TOKEN"]
+                    )
+                st.session_state["dbx_client"].files_upload(
+                    contenido_descarga.encode("utf-8"),
+                    f"/{nombre_archivo}",
+                    mode=dropbox.files.WriteMode("overwrite")
+                )
+                st.toast("☁️ Reporte subido a tu Dropbox correctamente.", icon="✅")
+            except KeyError:
+                pass  # Dropbox aún no está configurado en los secrets; no hacemos nada
+            except Exception as e:
+                st.warning(f"No se pudo subir el reporte a Dropbox: {str(e)}")
 
             progress_bar.progress(100, text="¡Listo!")
             time.sleep(0.5)
@@ -379,6 +368,7 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
+# --- Mostrar el reporte y el botón de descarga (persiste aunque interactúes con el chat) ---
 if st.session_state["report"]:
     st.success("✅ ¡Auditoría completada exitosamente! La descarga del reporte debió iniciar automáticamente.")
 
@@ -400,10 +390,12 @@ if st.session_state["report"]:
     st.subheader("💬 Discute los resultados con el asistente")
     st.caption("Pregúntale sobre el tono, la resolución, el cliente, o cualquier detalle de la llamada.")
 
+    # Mostrar historial del chat
     for msg in st.session_state["chat_messages"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
+    # Caja de texto para preguntar
     pregunta = st.chat_input("Escribe tu pregunta sobre la llamada...")
 
     if pregunta:
