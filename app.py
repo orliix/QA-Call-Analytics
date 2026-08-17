@@ -32,6 +32,7 @@ def password_entered():
     else:
         st.session_state["autenticado"] = False
 
+
 def check_password():
     if st.session_state.get("autenticado", False):
         return True
@@ -43,6 +44,7 @@ def check_password():
         st.error("😕 Contraseña incorrecta, intenta de nuevo.")
 
     return False
+
 
 if not check_password():
     st.stop()
@@ -104,32 +106,9 @@ def sanitizar_para_nombre_archivo(texto):
     texto = texto.strip('_')
     return texto if texto else "Agente"
 
+
 SYSTEM_INSTRUCTIONS = """
-[AGENT IDENTITY] You are a dedicated, verbatim Call Transcription Engine and Quality Specialist. Your persistent primary directive is to process provided call audio files into clean, accurate, and structured output.
-
-[CORE WORKFLOW]
-1. DETECT LANGUAGE AND GENERATE A COMPLETE, VERBATIM TRANSCRIPT:
-   - Automatically detect the language(s) spoken in the call (e.g. Spanish, English, or a mix of both).
-   - Transcribe each segment in the EXACT language it was spoken. Never translate — if the call switches languages mid-conversation (e.g. agent speaks English, customer replies in Spanish), preserve that switch faithfully.
-   - Identify each distinct speaker and label them by their role based on context, not just "Speaker 1/2":
-       * "Agent" — the company representative handling the call.
-       * "Customer" — the caller.
-       * Any additional participant gets its own clear label (e.g. "Customer 2", "Supervisor", "Interpreter") if more than two people speak.
-   - Insert accurate timestamps at key intervals or speaker changes formatted as [MM:SS].
-   - Capture every spoken word verbatim in the original language without summarizing, shortening, or paraphrasing the dialogue.
-   - Flag any silence/dead air longer than 20 seconds directly inline in the transcript, e.g. "[Dead air - 25s]", at the point where it occurs.
-
-2. CALL OVERVIEW (write this section in English, regardless of the language spoken on the call):
-   - Agent Name (if stated on the call): Listen for the agent introducing themselves, usually near the start of the call (e.g. "my name is...", "you're speaking with...", "this is ... from..."). If a name is clearly stated at any point, write it exactly as spoken (proper capitalization). If no name is ever mentioned, write exactly: Not stated
-   - Language(s) Detected: [e.g. "Spanish", "English", or "Spanish and English (mixed)"]
-   - Reason for Call: 1-2 sentences summarizing the caller's main issue/request.
-   - Resolution Provided: 1-2 sentences summarizing the outcome or next steps.
-
-3. SOFT SKILLS & CUSTOMER SERVICE ASSESSMENT (write this entire section in English, regardless of the language spoken on the call):
-   Evaluate EACH item below individually. For each one, give a rating of "✅ Meets", "⚠️ Partial", "❌ Does Not Meet", or "N/A" if it doesn't apply to this call, followed by a one-sentence justification (include a [MM:SS] timestamp reference when relevant):
-   - **Professionalism Throughout the Call:** ...
-   - **Avoided Jargon:** ...
-   (truncated for brevity)
+[AGENT IDENTITY] You are a dedicated, verbatim Call Transcription Engine and Quality Specialist. Your persistent primary directive is to process provided call audio files into clean, accurate, an[...]
 """
 
 # --- Espacio en memoria de la sesión: aquí se guarda el reporte y el chat ---
@@ -142,6 +121,7 @@ st.session_state.setdefault("download_content", "")
 st.session_state.setdefault("chat_session", None)
 st.session_state.setdefault("chat_messages", [])
 st.session_state.setdefault("auto_download_done", False)
+st.session_state.setdefault("dropbox_last_upload", None)
 
 uploaded_file = st.file_uploader(
     "Selecciona un archivo de audio (.mp3, .wav, .m4a, .aac, .ogg, .flac, .aiff)",
@@ -149,6 +129,11 @@ uploaded_file = st.file_uploader(
 )
 
 agent_name_input = st.text_input("Nombre del agente (respaldo, solo se usa si la IA no logra detectarlo en la llamada):", key="agent_name_input")
+
+def generar_nombre_archivo(agent_name_sanitizado, descripcion="ReporteQA"):
+    """Genera filename en formato YYYY-MM-DD_HHMMSS_Agente_Nombre_Descripción.txt"""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    return f"{timestamp}_Agente_{agent_name_sanitizado}_{descripcion}.txt"
 
 if uploaded_file is not None:
     st.audio(uploaded_file, format=uploaded_file.type)
@@ -258,10 +243,10 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
             st.session_state["chat_messages"] = []  # limpiar chat anterior si procesa una llamada nueva
             st.session_state["processed_file_id"] = current_file_id
 
-            # 5. Armar el nombre del archivo (Agente_Fecha) y el contenido a descargar
+            # 5. Armar el nombre del archivo (Agente_Fecha_Hora_Descripción) y el contenido a descargar
             nombre_agente_archivo = sanitizar_para_nombre_archivo(st.session_state["agent_name"])
-            fecha_archivo = st.session_state["audit_date"].replace("/", "-")
-            nombre_archivo = f"Reporte_QA_{nombre_agente_archivo}_{fecha_archivo}.txt"
+            # Generar filename con timestamp para evitar colisiones
+            nombre_archivo = generar_nombre_archivo(nombre_agente_archivo, descripcion="ReporteQA")
 
             encabezado_txt = (
                 f"Audited Agent: {st.session_state['agent_name']}\n"
@@ -327,7 +312,24 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
                     autorename=True
                 )
 
+                # Guardar metadata útil en la sesión para localización posterior
+                try:
+                    server_mod = metadata.server_modified.isoformat() if hasattr(metadata, 'server_modified') else None
+                except Exception:
+                    server_mod = None
+
+                st.session_state["dropbox_last_upload"] = {
+                    "name": getattr(metadata, 'name', None),
+                    "id": getattr(metadata, 'id', None),
+                    "server_modified": server_mod,
+                    "path_lower": getattr(metadata, 'path_lower', None)
+                }
+
                 st.toast(f"☁️ Reporte subido a tu Dropbox correctamente ({metadata.name}).", icon="✅")
+                # Mostrar info adicional al usuario
+                if st.session_state.get("dropbox_last_upload"):
+                    info = st.session_state["dropbox_last_upload"]
+                    st.info(f"Archivo en Dropbox: {info.get('name')} — subido: {info.get('server_modified')}")
 
             except KeyError as ke:
                 # Dropbox no configurado en secrets; informar sin romper la app
@@ -374,6 +376,11 @@ if st.session_state["report"]:
         file_name=st.session_state["download_filename"],
         mime="text/plain"
     )
+
+    # Mostrar información de la última subida a Dropbox si existe
+    if st.session_state.get("dropbox_last_upload"):
+        info = st.session_state["dropbox_last_upload"]
+        st.info(f"Última subida a Dropbox: {info.get('name')} — {info.get('server_modified')}")
 
     st.divider()
     st.subheader("💬 Discute los resultados con el asistente")
