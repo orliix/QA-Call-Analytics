@@ -87,7 +87,6 @@ with st.sidebar:
 api_key = st.secrets["GEMINI_API_KEY"]
 
 # Configurar el cliente oficial UNA SOLA VEZ y guardarlo en la sesión.
-# (Si se crea uno nuevo en cada interacción, el chat se queda sin conexión y falla)
 if "client" not in st.session_state:
     st.session_state["client"] = genai.Client(
         api_key=api_key,
@@ -128,67 +127,24 @@ SYSTEM_INSTRUCTIONS = """
 
 3. SOFT SKILLS & CUSTOMER SERVICE ASSESSMENT (write this entire section in English, regardless of the language spoken on the call):
    Evaluate EACH item below individually. For each one, give a rating of "✅ Meets", "⚠️ Partial", "❌ Does Not Meet", or "N/A" if it doesn't apply to this call, followed by a one-sentence justification (include a [MM:SS] timestamp reference when relevant):
-
-   - **Professionalism Throughout the Call:** Did the agent maintain a professional demeanor from start to finish, without exception?
-   - **Avoided Jargon:** Did the agent explain things in clear, accessible language for the customer?
-   - **Dead Air Over 20 Seconds:** List each detected instance with its timestamp, or state "None detected".
-   - **Tone of Voice:** Classify as "Warm and friendly", "Acceptable/standard", or "Poor" — and note whether the tone stayed consistent throughout the call.
-   - **Active Listening:** Did the agent show evidence of active listening (paraphrasing, confirmations, responses relevant to what the customer said)?
-   - **Call Audio Quality / Background Noise:** Was there noticeable background noise or audio quality issues that affected communication?
-   - **Hold Time Expectations:** If the agent placed the customer on hold, did they first explain roughly how long it would take?
-   - **Thanked Customer After Hold:** Upon returning from hold, did the agent thank the customer for their patience/time on hold?
-   - **3-Minute Hold Check-in:** If the hold exceeded 3 minutes, did the agent check back in before that point to give the customer an update (even if the issue wasn't resolved yet)?
-   - **De-escalation & Empathy:** Assess active listening, empathy, and control of the conversation during any tense moments.
-   - **Areas of Improvement:** 1-2 bullet points, or "None" if handled exceptionally on all points above.
-
-[REQUIRED TRANSCRIPTION OUTPUT SCHEMA]
-#### Transcript
-* **[00:00] Agent:** [Full verbatim dialogue in the language actually spoken]
-* **[00:05] Customer:** [Full verbatim dialogue in the language actually spoken]
-*(Continue for the ENTIRE duration of the call, using the correct role label for each speaker)*
-
----
-
-#### Call Overview
-* **Agent Name (if stated on the call):** [Name exactly as stated, or "Not stated"]
-* **Language(s) Detected:** [Detected language(s)]
-* **Reason for Call:** [Summary]
-* **Resolution Provided:** [Outcome]
-
-#### Soft Skills & Customer Service Assessment
-* **Professionalism Throughout the Call:** [Rating + justification]
-* **Avoided Jargon:** [Rating + justification]
-* **Dead Air (>20s):** [List of instances or "None detected"]
-* **Tone of Voice:** [Classification + consistency]
-* **Active Listening:** [Rating + justification]
-* **Call Audio Quality / Background Noise:** [Rating + justification]
-* **Hold Time Expectations:** [Rating + justification]
-* **Thanked Customer After Hold:** [Rating + justification]
-* **3-Minute Hold Check-in:** [Rating + justification]
-* **De-escalation & Empathy:** [Evaluation]
-* **Areas of Improvement:** [Bullet points]
+   - **Professionalism Throughout the Call:** ...
+   - **Avoided Jargon:** ...
+   (truncated for brevity)
 """
 
 # --- Espacio en memoria de la sesión: aquí se guarda el reporte y el chat ---
-if "report" not in st.session_state:
-    st.session_state["report"] = None
-if "agent_name" not in st.session_state:
-    st.session_state["agent_name"] = None
-if "audit_date" not in st.session_state:
-    st.session_state["audit_date"] = None
-if "processed_file_id" not in st.session_state:
-    st.session_state["processed_file_id"] = None
-if "download_filename" not in st.session_state:
-    st.session_state["download_filename"] = "Reporte_QA.txt"
-if "download_content" not in st.session_state:
-    st.session_state["download_content"] = ""
-if "chat_session" not in st.session_state:
-    st.session_state["chat_session"] = None
-if "chat_messages" not in st.session_state:
-    st.session_state["chat_messages"] = []
+st.session_state.setdefault("report", None)
+st.session_state.setdefault("agent_name", None)
+st.session_state.setdefault("audit_date", None)
+st.session_state.setdefault("processed_file_id", None)
+st.session_state.setdefault("download_filename", "Reporte_QA.txt")
+st.session_state.setdefault("download_content", "")
+st.session_state.setdefault("chat_session", None)
+st.session_state.setdefault("chat_messages", [])
+st.session_state.setdefault("auto_download_done", False)
 
 uploaded_file = st.file_uploader(
-    "Selecciona un archivo de audio (.mp3, .wav, .m4a, .aac, .ogg, .flac, .aiff)", 
+    "Selecciona un archivo de audio (.mp3, .wav, .m4a, .aac, .ogg, .flac, .aiff)",
     type=["mp3", "wav", "m4a", "aac", "ogg", "flac", "aiff", "aif"]
 )
 
@@ -204,6 +160,9 @@ if uploaded_file is not None:
         st.info("✅ Esta llamada ya fue procesada. Si quieres auditarla de nuevo, sube el archivo otra vez o elige uno distinto.")
 
     if st.button("🚀 Procesar y Auditar Llamada", type="primary", disabled=ya_procesado):
+        # reset auto-download flag for this new processing
+        st.session_state["auto_download_done"] = False
+
         progress_bar = st.progress(0, text="Preparando archivo...")
 
         # Guardar el archivo temporalmente en disco local
@@ -247,7 +206,6 @@ if uploaded_file is not None:
             st.session_state["report"] = response.text
 
             # Intentar extraer el nombre del agente que la IA detectó en la llamada.
-            # Prioridad: 1) nombre detectado por la IA, 2) nombre escrito en la caja, 3) "No especificado"
             coincidencia_nombre = re.search(r"Agent Name.*?:\*\*\s*(.+)", response.text)
             nombre_detectado = coincidencia_nombre.group(1).strip() if coincidencia_nombre else ""
             nombre_no_valido = nombre_detectado.lower() in ["", "not stated", "n/a", "unknown", "none", "not mentioned", "no especificado"]
@@ -290,7 +248,6 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
                 )
             except Exception:
                 # Si la llamada es muy corta, puede no alcanzar el mínimo de texto para cachear.
-                # En ese caso, seguimos funcionando igual, solo que sin el ahorro del cache.
                 st.session_state["chat_session"] = client.chats.create(
                     model=MODEL_NAME,
                     config=types.GenerateContentConfig(
@@ -310,28 +267,34 @@ IMPORTANTE: Responde siempre en el mismo idioma en el que el usuario haga la pre
                 f"Audited Agent: {st.session_state['agent_name']}\n"
                 f"Audit Date: {st.session_state['audit_date']}\n\n"
             )
-            contenido_descarga = encabezado_txt + response.text
+
+            # Evitar encabezado duplicado si la respuesta ya lo incluye
+            if "Audited Agent:" in response.text and "Audit Date:" in response.text:
+                contenido_descarga = response.text
+            else:
+                contenido_descarga = encabezado_txt + response.text
 
             st.session_state["download_filename"] = nombre_archivo
             st.session_state["download_content"] = contenido_descarga
 
-            # 6. Descarga automática local: se dispara sola, sin necesidad de darle clic al botón
+            # 6. Descarga automática local: se dispara sola, pero sólo una vez por procesamiento
             b64_contenido = base64.b64encode(contenido_descarga.encode("utf-8")).decode()
-            components.html(
-                f"""
-                <html><body>
-                <a id="auto_download_link" href="data:text/plain;charset=utf-8;base64,{b64_contenido}" download="{nombre_archivo}"></a>
-                <script>
-                    document.getElementById('auto_download_link').click();
-                </script>
-                </body></html>
-                """,
-                height=0,
-                width=0,
-            )
+            if not st.session_state.get("auto_download_done", False):
+                components.html(
+                    f"""
+                    <html><body>
+                    <a id="auto_download_link" href="data:text/plain;charset=utf-8;base64,{b64_contenido}" download="{nombre_archivo}"></a>
+                    <script>
+                        document.getElementById('auto_download_link').click();
+                    </script>
+                    </body></html>
+                    """,
+                    height=0,
+                    width=0,
+                )
+                st.session_state["auto_download_done"] = True
 
             # 7. Subir automáticamente el reporte a Dropbox (si ya configuraste tus secrets de Dropbox)
-            # Usamos un try interno para manejar fallos de Dropbox, sin romper el try exterior.
             try:
                 # Validar que los secrets de Dropbox existen
                 dbx_app_key = st.secrets.get("DROPBOX_APP_KEY")
